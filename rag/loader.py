@@ -3,10 +3,10 @@ Document Loader Module
 Handles loading of TXT ,PDF, and directory-based documents."""
 
 import logging
-from pathlib import path 
+from pathlib import Path 
 from typing import List,Optional
 from langchain_core.documents import Document
-from lanchain_community.document_loaders import (
+from langchain_community.document_loaders import (
     TextLoader,
     DirectoryLoader,
     PyMuPDFLoader,
@@ -25,8 +25,8 @@ class DocumentLoader:
         path=Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        if path.suffix not in self.supported_extension:
-            raise ValueError(f"Unsupported file type: {path.suffix}. Supported :{self.supported_extension}")
+        if path.suffix not in self.supported_extensions:
+            raise ValueError(f"Unsupported file type: {path.suffix}. Supported :{self.supported_extensions}")
         
 
         logger.info(f"Loading file: {file_path}")
@@ -39,15 +39,15 @@ class DocumentLoader:
         logger.info(f"loaded {len(docs)} document(s) from {file_path}")
         return docs
     
-        def load_directory(
-                self,
-                dir_path:str,
-                glob:str="**/*.*",
-                extensions:Optional[List[str]]=None,
-                ) -> List[Document]:
+    def load_directory(
+            self,
+            dir_path:str,
+            glob:str="**/*.*",
+            extensions:Optional[List[str]]=None,
+            ) -> List[Document]:
             path=Path(dir_path)
             if not path.exists():
-                raise FileFoundNotError(f"Directory not found: {dir_path}")
+                raise FileNotFoundError(f"Directory not found: {dir_path}")
             allowed=extensions or list(self.supported_extensions) 
             all_docs: List[Document]=[]
             for ext in allowed:
@@ -57,7 +57,7 @@ class DocumentLoader:
                         str(path),
                         glob=ext_glob,
                         loader_cls=TextLoader,
-                        loader_kwargs={"encoding","utf-8"},
+                        loader_kwargs={"encoding":"utf-8"},
                         show_progress=False,
                         silent_errors=True,
                     )  
@@ -67,7 +67,7 @@ class DocumentLoader:
                         glob=ext_glob,
                         loader_cls=PyMuPDFLoader,
                         show_progress=False,
-                        silent_erros=True,
+                        silent_errors=True,
                     )
                 else:
                     continue
@@ -79,8 +79,18 @@ class DocumentLoader:
                     logger.warning(f" [{ext}] Error loading: {e}")
             logger.info(f"Total documents loaded from '{dir_path}': {len(all_docs)}") 
             return all_docs
-        def load_from_paths(self,paths:List[str]) -> List[Document]:
-            ""     
+    def load_from_paths(self,paths:List[str]) -> List[Document]:
+        """ Load Documents from a mixed list of file/directory paths.""" 
+        all_docs: List[Document] = []
+        for p in paths:
+            path=Path(p)
+            if path.is_dir():
+                all_docs.extend(self.load_directory(p))
+            elif path.is_file():
+                all_docs.extend(self.load_file(p))
+            else:
+                logger.warning(f"path does not exist, skipping: {p}")
+        return all_docs    
             
             
                
