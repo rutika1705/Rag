@@ -1,6 +1,6 @@
 # 🔍 Production RAG Pipeline
 
-A modular, production-grade **Retrieval-Augmented Generation** system built for ML/AI Engineer portfolios. Supports multiple LLM backends, semantic + MMR retrieval, streaming, and a full chat UI.
+A modular, production-grade **Retrieval-Augmented Generation** system. Supports multiple LLM backends, semantic + MMR retrieval, RAGAS-style evaluation, streaming, and a full chat UI.
 
 ---
 
@@ -62,6 +62,7 @@ rag-pipeline/
 │   └── pipeline.py       ← End-to-end orchestrator
 │
 ├── app.py                ← Streamlit chat UI
+├── evaluate.py           ← RAGAS-style evaluation (5 metrics)
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
@@ -230,14 +231,57 @@ Top-K retrieval can return 5 nearly identical chunks from the same paragraph. MM
 
 ---
 
-## 📈 What to add next (roadmap)
+## 📊 Evaluation
 
-- [ ] **Evaluation** — RAGAS metrics (faithfulness, answer relevancy, context precision)
-- [ ] **Reranking** — Cross-encoder reranking (Cohere Rerank / BGE-reranker) after retrieval
-- [ ] **Hybrid search** — BM25 + dense retrieval with RRF fusion
-- [ ] **Conversation memory** — Multi-turn chat with history compression
-- [ ] **Async pipeline** — FastAPI backend for concurrent requests
-- [ ] **Docker** — Containerized deployment
+Built-in RAGAS-style evaluation with 5 metrics — no external dependencies needed.
+
+| Metric | What it measures | Needs ground truth |
+|---|---|---|
+| **Faithfulness** | Are answer claims supported by the retrieved context? | No |
+| **Answer Relevancy** | Does the answer address the question? | No |
+| **Context Precision** | Are retrieved chunks actually relevant to the query? | No |
+| **Context Recall** | Does the context cover the ground-truth answer? | Yes |
+| **Answer Correctness** | Semantic similarity of answer to reference answer | Yes |
+
+**Single query evaluation:**
+```python
+from evaluate import evaluate_pipeline_response
+
+report = evaluate_pipeline_response(
+    pipeline=pipeline,
+    question="What is the attention mechanism?",
+    ground_truth="Attention weights positions using query-key dot products.",
+)
+print(report.summary())
+```
+
+**Output:**
+```
+============================================================
+QUESTION : What is the attention mechanism?
+ANSWER   : The attention mechanism maps queries to key-value pairs...
+------------------------------------------------------------
+METRICS:
+  faithfulness              ████████████████░░░░  0.821
+  answer_relevancy          ██████████████████░░  0.903
+  context_precision         ███████████████░░░░░  0.750
+  context_recall            █████████████████░░░  0.867
+  answer_correctness        ████████████████░░░░  0.812
+------------------------------------------------------------
+  MEAN SCORE                ████████████████░░░░  0.831
+  Latency: 1243 ms
+============================================================
+```
+
+**Batch evaluation with CSV export:**
+```python
+from evaluate import RAGEvaluator, EvalSample
+
+samples = [EvalSample(question=q, answer=a, contexts=c, ground_truth=g) for ...]
+evaluator = RAGEvaluator(embedding_manager=embedder, generator=gen)
+batch = evaluator.evaluate_batch(samples, output_csv="results.csv")
+print(batch.summary())
+```
 
 ---
 
