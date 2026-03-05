@@ -4,7 +4,7 @@ Persistent ChromaDB-backed store for document embeddings.
 """
 
 import logging
-import uuid
+import uuid #creates unique IDs
 from typing import Any, Dict, List, Optional
 import numpy as np
 from langchain_core.documents import Document

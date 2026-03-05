@@ -1,8 +1,24 @@
 """
-Embedding Module
-Converts text into dense vector representations using SentenceTransformers.
+1.load_model:to load_model with model_name
+2.dimension:model not load then return dimension
+3.embed:covert text into vectors(embeddings)
+4.embed_query :turn query into embeddings by calling embed function
 """
+"""
+line_no:85
+a = [3, 4]    # "I love cats"
+b = [6, 8]    # "I absolutely love cats"
+# dot product
+a · b = (3×6) + (4×8) = 18 + 32 = 50
 
+# lengths
+|a| = √(9+16)  = 5
+|b| = √(36+64) = 10
+
+# cosine similarity
+cos_sim = 50 / (5 × 10)
+        = 50 / 50
+        = 1.0   identical meaning!"""
 import logging
 from typing import List, Union
 import numpy as np
@@ -22,14 +38,9 @@ class EmbeddingManager:
     """
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
-        """
-        Args:
-            model_name: HuggingFace model identifier.
-            device:     'cpu', 'cuda', or 'mps' (Apple Silicon).
-        """
         self.model_name = model_name
         self.device = device
-        self.model: SentenceTransformer = None
+        self.model: SentenceTransformer = None #hint that it will hold sentencetransformer
         self._load_model()
 
     def _load_model(self) -> None:
@@ -42,34 +53,22 @@ class EmbeddingManager:
         except Exception as e:
             logger.error(f"Failed to load embedding model '{self.model_name}': {e}")
             raise
-        # ← BUG FIX: dimension/embed/embed_query were indented inside _load_model
-        #   in the original code, making them unreachable nested functions.
-        #   They are now correctly defined at class level below.
 
-    @property
+
+    @property # access it without parentheses()
     def dimension(self) -> int:
         """Return the embedding dimensionality."""
         if not self.model:
             raise RuntimeError("Model not loaded.")
-        return self.model.get_sentence_embedding_dimension()
+        return self.model.get_sentence_embedding_dimension()  #number like 384 or 768
 
     def embed(
         self,
-        texts: Union[str, List[str]],
-        batch_size: int = 64,
+        texts: Union[str, List[str]],# either one string or a list of strings
+        batch_size: int = 64,# process 64 texts at a time (no memory overload) and default(64)
         show_progress: bool = False,
     ) -> np.ndarray:
-        """
-        Generate embeddings for one or more texts.
-
-        Args:
-            texts:         A single string or list of strings.
-            batch_size:    Number of texts to encode in each batch.
-            show_progress: Show tqdm progress bar for large batches.
-
-        Returns:
-            np.ndarray of shape (N, embedding_dim).
-        """
+       
         if not self.model:
             raise RuntimeError("Model not loaded.")
 
@@ -82,6 +81,7 @@ class EmbeddingManager:
             batch_size=batch_size,
             show_progress_bar=show_progress,
             convert_to_numpy=True,
+            #with normalization alll vectors same length
             normalize_embeddings=True,  # L2-normalize → cosine sim == dot product
         )
         logger.debug(f"Embeddings shape: {embeddings.shape}")
@@ -89,4 +89,4 @@ class EmbeddingManager:
 
     def embed_query(self, query: str) -> np.ndarray:
         """Embed a single query string. Returns shape (dim,)."""
-        return self.embed([query])[0]
+        return self.embed([query])[0] #(1, 384)  → row_no(no_need), 384 numbers
