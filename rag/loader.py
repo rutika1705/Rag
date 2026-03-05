@@ -4,7 +4,7 @@ Handles loading of TXT ,PDF, and directory-based documents."""
 
 import logging
 from pathlib import Path 
-from typing import List,Optional
+from typing import List,Optional  #Optional[List[str]] means "either a list of strings, or nothing at all"
 from langchain_core.documents import Document
 from langchain_community.document_loaders import (
     TextLoader,
@@ -45,6 +45,7 @@ class DocumentLoader:
             glob:str="**/*.*",
             extensions:Optional[List[str]]=None,
             ) -> List[Document]:
+            """Load all supported files from a directory."""
             path=Path(dir_path)
             if not path.exists():
                 raise FileNotFoundError(f"Directory not found: {dir_path}")
