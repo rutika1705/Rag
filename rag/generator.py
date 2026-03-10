@@ -1,7 +1,7 @@
 """
 Generator Module
 LLM-based answer generation from retrieved context.
-Supports Groq, OpenAI, and Ollama (local) backends.
+Supports Groq, OpenAI, Ollama (local), and HuggingFace backends.
 """
 
 import logging
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class GenerationConfig:
     """Tunable generation parameters."""
     model: str = "llama3-8b-8192"
-    temperature: float = 0.2        # Low = factual/deterministic; high = creative
-    max_tokens: int = 1024
+    temperature: float = 0.2
+    max_tokens: int = 256          # FIXED: was 1024, reduced to 256 for TinyLlama
     top_p: float = 0.9
     stream: bool = False
 
@@ -41,7 +41,6 @@ class RAGResponse:
         return self.prompt_tokens + self.completion_tokens
 
     def format_sources(self) -> str:
-        """Human-readable source list."""
         lines = []
         for i, src in enumerate(self.sources, 1):
             meta = src.get("metadata", {})
@@ -80,11 +79,6 @@ ANSWER:"""
 
 
 def build_prompt(question: str, retrieved_docs: List[Dict[str, Any]]) -> str:
-    """
-    Construct a RAG prompt from a question and retrieved document chunks.
-
-    Each chunk is prefixed with its source for citation awareness.
-    """
     context_blocks = []
     for i, doc in enumerate(retrieved_docs, 1):
         meta = doc.get("metadata", {})
@@ -106,8 +100,6 @@ def build_prompt(question: str, retrieved_docs: List[Dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 class LLMBackend(ABC):
-    """Abstract base for LLM provider backends."""
-
     @abstractmethod
     def complete(self, prompt: str, config: GenerationConfig) -> RAGResponse:
         ...
@@ -118,20 +110,16 @@ class LLMBackend(ABC):
 
 
 class GroqBackend(LLMBackend):
-    """
-    Groq Cloud backend. Free tier available at console.groq.com.
-    Supported models: llama3-8b-8192, llama3-70b-8192, mixtral-8x7b-32768
-    """
+    """Groq Cloud backend. Free tier at console.groq.com."""
 
     def __init__(self, api_key: Optional[str] = None):
         try:
             from groq import Groq
         except ImportError:
             raise ImportError("Install groq: pip install groq")
-
         key = api_key or os.getenv("GROQ_API_KEY")
         if not key:
-            raise ValueError("GROQ_API_KEY not set. Export it or pass api_key=...")
+            raise ValueError("GROQ_API_KEY not set.")
         self._client = Groq(api_key=key)
 
     def complete(self, prompt: str, config: GenerationConfig) -> RAGResponse:
@@ -165,17 +153,13 @@ class GroqBackend(LLMBackend):
 
 
 class OpenAIBackend(LLMBackend):
-    """
-    OpenAI backend. Requires OPENAI_API_KEY.
-    Supported models: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
-    """
+    """OpenAI backend. Requires OPENAI_API_KEY."""
 
     def __init__(self, api_key: Optional[str] = None):
         try:
             from openai import OpenAI
         except ImportError:
             raise ImportError("Install openai: pip install openai")
-
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise ValueError("OPENAI_API_KEY not set.")
@@ -210,11 +194,7 @@ class OpenAIBackend(LLMBackend):
 
 
 class OllamaBackend(LLMBackend):
-    """
-    Ollama backend — runs LLMs locally. No API key required.
-    Install Ollama and pull a model: ollama pull llama3
-    Default model: llama3
-    """
+    """Ollama backend — runs LLMs locally. No API key required."""
 
     def __init__(self, base_url: str = "http://localhost:11434"):
         try:
@@ -245,6 +225,58 @@ class OllamaBackend(LLMBackend):
                 yield delta
 
 
+class HuggingFaceBackend(LLMBackend):
+    """
+    HuggingFace Transformers backend — runs models locally.
+    Works on HuggingFace Spaces CPU. No API key required.
+    """
+
+    def __init__(self, model_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"):
+        try:
+            from transformers import pipeline
+            import torch
+        except ImportError:
+            raise ImportError("Install transformers: pip install transformers torch")
+
+        self._pipe = pipeline(
+            "text-generation",
+            model=model_name,
+            torch_dtype=torch.float32,
+            device=-1,  # -1 = CPU explicitly
+        )
+        self._model_name = model_name
+
+    def complete(self, prompt: str, config: GenerationConfig) -> RAGResponse:
+        # FIXED: Truncate prompt to 1024 tokens before passing to model
+        # This prevents the "2453 > 2048" warning and indexing errors
+        inputs = self._pipe.tokenizer(
+            prompt,
+            truncation=True,
+            max_length=1024,
+            return_tensors="pt"
+        )
+        truncated_prompt = self._pipe.tokenizer.decode(
+            inputs["input_ids"][0],
+            skip_special_tokens=True
+        )
+
+        output = self._pipe(
+            truncated_prompt,
+            max_new_tokens=256,        # FIXED: hardcoded 256, no conflict with max_length
+            temperature=config.temperature,
+            top_p=config.top_p,
+            do_sample=True,
+        )
+        answer = output[0]["generated_text"]
+        if "ANSWER:" in answer:
+            answer = answer.split("ANSWER:")[-1].strip()
+        return RAGResponse(answer=answer, model=self._model_name)
+
+    def stream(self, prompt: str, config: GenerationConfig) -> Iterator[str]:
+        response = self.complete(prompt, config)
+        yield response.answer
+
+
 # ---------------------------------------------------------------------------
 # High-level Generator
 # ---------------------------------------------------------------------------
@@ -253,32 +285,19 @@ BACKENDS = {
     "groq": GroqBackend,
     "openai": OpenAIBackend,
     "ollama": OllamaBackend,
+    "huggingface": HuggingFaceBackend,
 }
 
 
 class RAGGenerator:
-    """
-    Orchestrates prompt construction and LLM generation.
-
-    Usage:
-        generator = RAGGenerator(provider="groq")
-        response = generator.generate(question, retrieved_docs)
-        print(response.answer)
-        print(response.format_sources())
-    """
+    """Orchestrates prompt construction and LLM generation."""
 
     def __init__(
         self,
-        provider: str = "groq",
+        provider: str = "huggingface",
         config: Optional[GenerationConfig] = None,
         **backend_kwargs,
     ):
-        """
-        Args:
-            provider: One of 'groq', 'openai', 'ollama'.
-            config:   GenerationConfig instance (uses defaults if None).
-            **backend_kwargs: Passed to the backend (e.g. api_key=...).
-        """
         if provider not in BACKENDS:
             raise ValueError(f"Unknown provider '{provider}'. Choose from: {list(BACKENDS)}")
 
@@ -292,16 +311,6 @@ class RAGGenerator:
         question: str,
         retrieved_docs: List[Dict[str, Any]],
     ) -> RAGResponse:
-        """
-        Generate an answer grounded in the retrieved documents.
-
-        Args:
-            question:       User's question.
-            retrieved_docs: Output of RAGRetriever.retrieve().
-
-        Returns:
-            RAGResponse with answer, sources, and token usage.
-        """
         if not retrieved_docs:
             logger.warning("No documents retrieved — answer will be unsupported.")
 
@@ -322,11 +331,5 @@ class RAGGenerator:
         question: str,
         retrieved_docs: List[Dict[str, Any]],
     ) -> Iterator[str]:
-        """
-        Stream the answer token-by-token. Useful for chat UIs.
-
-        Yields:
-            Text chunks as they arrive from the LLM.
-        """
         prompt = build_prompt(question, retrieved_docs)
         yield from self.backend.stream(prompt, self.config)

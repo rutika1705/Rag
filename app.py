@@ -108,7 +108,7 @@ with st.sidebar:
 
     # API key
     st.markdown("**LLM Provider**")
-    provider = st.selectbox("Provider", ["groq", "openai", "ollama"], index=0)
+    provider = st.selectbox("Provider", ["groq", "openai", "ollama","huggingface"], index=3)
 
     api_key = ""
     if provider in ("groq", "openai"):
@@ -124,7 +124,8 @@ with st.sidebar:
     model_options = {
         "groq": ["llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
         "openai": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-        "ollama": ["llama3", "mistral", "phi3", "gemma2"],
+        "ollama": ["llama3", "mistral", "phi3", "gemma2","tinyllama"],
+        "huggingface": ["TinyLlama/TinyLlama-1.1B-Chat-v1.0"],
     }
     model = st.selectbox("Model", model_options[provider])
 
@@ -165,7 +166,8 @@ with st.sidebar:
             with st.spinner("Indexing documents..."):
                 try:
                     # Save uploads to temp dir
-                    tmpdir = tempfile.mkdtemp()
+                    tmpdir = "/tmp/rag_uploads"
+                    os.makedirs(tmpdir, exist_ok=True)
                     for f in uploaded_files:
                         dest = Path(tmpdir) / f.name
                         dest.write_bytes(f.read())
