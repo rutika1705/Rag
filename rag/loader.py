@@ -7,33 +7,38 @@ Handles loading of TXT, PDF, and directory-based documents.
 """
 
 import logging
-#Path=it has helper method(.exists(), .suffix, .is_dir())
-from pathlib import Path 
-"""type hints =what kind of data to expect.
-List[str] = a list of strings, like ["hello", "world"]
-Optional[str] = either a string or None"""
+from pathlib import Path
 from typing import List, Optional
 from langchain_core.documents import Document
-"""TextLoader → reads .txt files
-PyMuPDFLoader → reads .pdf files 
-DirectoryLoader → scans a whole folder & uses diff loaders for each file"""
 from langchain_community.document_loaders import (
     TextLoader,
     DirectoryLoader,
     PyMuPDFLoader,
 )
-#Creates a logger specifically for *this file*
+
 logger = logging.getLogger(__name__)
 
 
 class DocumentLoader:
-    # everything capital(SUPPORTED_EXTENSIONS) means this value won't change" 
-
     SUPPORTED_EXTENSIONS = {".txt", ".pdf"}
+
+    @staticmethod
+    def _sanitize(docs: List[Document]) -> List[Document]:
+        """
+        Strip non-UTF-8 characters from all loaded documents.
+        Prevents 'ascii codec can't encode' errors caused by special
+        characters in PDFs (em-dashes, bullets, smart quotes, etc.)
+        """
+        for doc in docs:
+            doc.page_content = (
+                doc.page_content
+                .encode("utf-8", errors="ignore")
+                .decode("utf-8")
+            )
+        return docs
 
     def load_file(self, file_path: str) -> List[Document]:
         """Load a single file (txt or pdf)."""
-        #Wraps the plain string "documents/report.pdf" into path for methods .exists()
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -42,44 +47,38 @@ class DocumentLoader:
 
         logger.info(f"Loading file: {file_path}")
         if path.suffix == ".txt":
-            loader = TextLoader(str(path), encoding="utf-8") #str(path) converts Path object back to a plain string
+            loader = TextLoader(str(path), encoding="utf-8")
         else:
             loader = PyMuPDFLoader(str(path))
-        
-        #Actually reads the file and returns a list of Documen
+
         docs = loader.load()
+        docs = self._sanitize(docs)  # FIXED: strip non-ASCII chars from PDF text
         logger.info(f"Loaded {len(docs)} document(s) from {file_path}")
         return docs
 
     def load_directory(
         self,
         dir_path: str,
-        extensions: Optional[List[str]] = None,#this can be either list of string or none
+        extensions: Optional[List[str]] = None,
     ) -> List[Document]:
         """Load all supported files from a directory."""
         path = Path(dir_path)
         if not path.exists():
             raise FileNotFoundError(f"Directory not found: {dir_path}")
-        
-        """loader.load_directory("docs/", extensions=[".pdf"])
-           # extensions = [".pdf"]
-
-            allowed = [".pdf"] or [".txt", ".pdf"]"""
 
         allowed = extensions or list(self.SUPPORTED_EXTENSIONS)
-        #all_docs will contain list of doc
         all_docs: List[Document] = []
 
         for ext in allowed:
-            ext_glob = f"**/*{ext}"  #"**/*.txt" 
+            ext_glob = f"**/*{ext}"
             if ext == ".txt":
                 loader = DirectoryLoader(
                     str(path),
                     glob=ext_glob,
                     loader_cls=TextLoader,
-                    loader_kwargs={"encoding": "utf-8"}, #kwargs(keyword arguments):asses extra options
-                    show_progress=False,# don't show a loading bar
-                    silent_errors=True,#if one file fails, skip
+                    loader_kwargs={"encoding": "utf-8"},
+                    show_progress=False,
+                    silent_errors=True,
                 )
             elif ext == ".pdf":
                 loader = DirectoryLoader(
@@ -94,6 +93,7 @@ class DocumentLoader:
 
             try:
                 docs = loader.load()
+                docs = self._sanitize(docs)  # FIXED: strip non-ASCII chars from PDF text
                 all_docs.extend(docs)
                 logger.info(f"  [{ext}] Loaded {len(docs)} documents")
             except Exception as e:
@@ -105,7 +105,7 @@ class DocumentLoader:
     def load_from_paths(self, paths: List[str]) -> List[Document]:
         """paths is list which contain paths of file & path of folders"""
         all_docs: List[Document] = []
-        for p in paths: 
+        for p in paths:
             path = Path(p)
             if path.is_dir():
                 all_docs.extend(self.load_directory(p))

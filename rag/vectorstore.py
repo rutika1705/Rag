@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class VectorStore:
-   
 
     def __init__(
         self,
@@ -71,8 +70,7 @@ class VectorStore:
         embeddings: np.ndarray,
         batch_size: int = 100,
     ) -> List[str]:
-      
-    
+
         if len(documents) != len(embeddings):
             raise ValueError(
                 f"Mismatch: {len(documents)} documents vs {len(embeddings)} embeddings."
@@ -101,10 +99,13 @@ class VectorStore:
 
             ids, texts, metas, emb_list = [], [], [], []
             for i, (doc, emb) in enumerate(zip(batch_docs, batch_embs)):
-                # Deterministic ID based on content hash to prevent duplicates
+                # FIXED: include chunk_index in hash to prevent duplicate IDs
+                # for chunks with identical content (caused by high overlap)
                 content_hash = uuid.uuid5(
                     uuid.NAMESPACE_X500,
-                    doc.page_content + str(doc.metadata.get("source", "")),
+                    doc.page_content
+                    + str(doc.metadata.get("source", ""))
+                    + str(doc.metadata.get("chunk_index", start + i)),  # ← key fix
                 ).hex[:16]
                 doc_id = f"doc_{content_hash}"
 
@@ -143,7 +144,7 @@ class VectorStore:
         top_k: int = 5,
         where: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
-        
+
         # Guard: ChromaDB raises if n_results=0
         if self.count == 0:
             logger.warning("Query called on empty collection.")
@@ -190,7 +191,7 @@ class VectorStore:
         return retrieved
 
     def reset_collection(self) -> None:
-       
+        """Wipe and recreate the collection. Called when reset=True in pipeline.index()."""
         self.client.delete_collection(self.collection_name)
         try:
             new_collection = self.client.create_collection(
@@ -206,3 +207,8 @@ class VectorStore:
             raise
         self.collection = new_collection
         logger.warning(f"Collection '{self.collection_name}' has been reset.")
+
+    # FIXED: alias so pipeline.py calling delete_collection() doesn't break
+    def delete_collection(self) -> None:
+        """Alias for reset_collection() for backwards compatibility."""
+        self.reset_collection()

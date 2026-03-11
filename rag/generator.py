@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GenerationConfig:
     """Tunable generation parameters."""
-    model: str = "llama3-8b-8192"
+    model: str = "llama-3.1-8b-instant"   # FIXED: updated from decommissioned llama3-8b-8192
     temperature: float = 0.2
-    max_tokens: int = 256          # FIXED: was 1024, reduced to 256 for TinyLlama
+    max_tokens: int = 256
     top_p: float = 0.9
     stream: bool = False
 
@@ -78,6 +78,11 @@ QUESTION: {question}
 ANSWER:"""
 
 
+def _sanitize(text: str) -> str:
+    """Strip non-UTF-8 characters to prevent ASCII codec errors downstream."""
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 def build_prompt(question: str, retrieved_docs: List[Dict[str, Any]]) -> str:
     context_blocks = []
     for i, doc in enumerate(retrieved_docs, 1):
@@ -85,9 +90,16 @@ def build_prompt(question: str, retrieved_docs: List[Dict[str, Any]]) -> str:
         source = meta.get("source", "unknown")
         page = meta.get("page", "")
         header = f"[Source {i}: {source}" + (f", page {int(page)+1}" if page != "" else "") + "]"
-        context_blocks.append(f"{header}\n{doc['content']}")
+
+        # FIXED: sanitize chunk content before building prompt
+        content = _sanitize(doc["content"])
+        context_blocks.append(f"{header}\n{content}")
 
     context = "\n\n".join(context_blocks)
+
+    # FIXED: sanitize question too
+    question = _sanitize(question)
+
     return RAG_PROMPT_TEMPLATE.format(
         system=SYSTEM_PROMPT,
         context=context,
@@ -247,8 +259,7 @@ class HuggingFaceBackend(LLMBackend):
         self._model_name = model_name
 
     def complete(self, prompt: str, config: GenerationConfig) -> RAGResponse:
-        # FIXED: Truncate prompt to 1024 tokens before passing to model
-        # This prevents the "2453 > 2048" warning and indexing errors
+        # Truncate prompt to 1024 tokens before passing to model
         inputs = self._pipe.tokenizer(
             prompt,
             truncation=True,
@@ -262,7 +273,7 @@ class HuggingFaceBackend(LLMBackend):
 
         output = self._pipe(
             truncated_prompt,
-            max_new_tokens=256,        # FIXED: hardcoded 256, no conflict with max_length
+            max_new_tokens=256,
             temperature=config.temperature,
             top_p=config.top_p,
             do_sample=True,
